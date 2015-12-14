@@ -43,7 +43,8 @@ PIX *pixFromSource(uint8_t *pixSource, int32_t width, int32_t height, int32_t de
             if (pix->d == 8) {
                 SET_DATA_BYTE(line, x, pixSource[0]);
             } else {
-                composeRGBPixel(pixSource[0], pixSource[1], pixSource[2], &line[x]);
+                line[x] = (pixSource[0] << L_RED_SHIFT) | (pixSource[1] << L_GREEN_SHIFT) |
+                          (pixSource[2] << L_BLUE_SHIFT) | (pixSource[3] << L_ALPHA_SHIFT);
             }
             pixSource += depth / 8;
         }
@@ -1356,7 +1357,32 @@ NAN_METHOD(Image::ToBuffer)
     char *jpgData;
     int jpgDataSize;
     unsigned error = 0;
-    if (obj->pix_->d == 32 || obj->pix_->d == 24) {
+    if (obj->pix_->d == 32 && formatInt != FORMAT_JPG) {
+        // RAW and PNG support alpha, so preserve alpha
+        imgData.reserve(obj->pix_->w * obj->pix_->h * 4);
+        uint32_t *line = obj->pix_->data;
+        for (uint32_t y = 0; y < obj->pix_->h; y++) {
+            for (uint32_t x = 0; x < obj->pix_->w; ++x) {
+                int32_t rval, gval, bval, aval;
+                rval = (line[x] >> L_RED_SHIFT) & 0xff;
+                gval = (line[x] >> L_GREEN_SHIFT) & 0xff;
+                bval = (line[x] >> L_BLUE_SHIFT) & 0xff;
+                aval = (line[x] >> L_ALPHA_SHIFT) & 0xff;
+                imgData.push_back(rval);
+                imgData.push_back(gval);
+                imgData.push_back(bval);
+                imgData.push_back(aval);
+            }
+            line += obj->pix_->wpl;
+        }
+        if (formatInt == FORMAT_PNG) {
+            lodepng::State state;
+            state.info_png.color.colortype = LCT_RGBA;
+            state.info_png.color.bitdepth = 8;
+            state.info_raw.colortype = LCT_RGBA;
+            error = lodepng::encode(pngData, imgData, obj->pix_->w, obj->pix_->h, state);
+        }
+    } else if (obj->pix_->d == 32 || obj->pix_->d == 24) {
         // Image is RGB, so create a 3 byte per pixel image.
         uint32_t *line;
         imgData.reserve(obj->pix_->w * obj->pix_->h * 3);
